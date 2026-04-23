@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>蓝奏云直链解析</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      min-height: 100vh;
+      background: #0f1117;
+      color: #e2e8f0;
+      font-family: 'JetBrains Mono', 'Fira Code', monospace;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+    }
+    h1 { font-size: 1.6rem; margin-bottom: 1.5rem; color: #7dd3fc; letter-spacing: 0.04em; }
+    .card {
+      background: #1e2235;
+      border: 1px solid #2d3554;
+      border-radius: 12px;
+      padding: 2rem;
+      width: 100%;
+      max-width: 600px;
+    }
+    input, button {
+      width: 100%;
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      font-family: inherit;
+      margin-bottom: 0.75rem;
+      outline: none;
+      border: 1px solid #2d3554;
+    }
+    input { background: #141824; color: #e2e8f0; }
+    input:focus { border-color: #7dd3fc; }
+    button {
+      background: #3b82f6;
+      color: #fff;
+      cursor: pointer;
+      border: none;
+      transition: background 0.2s;
+      margin-top: 0.25rem;
+    }
+    button:hover { background: #2563eb; }
+    button:disabled { background: #374151; cursor: not-allowed; }
+    .result {
+      margin-top: 1rem;
+      padding: 1rem;
+      background: #141824;
+      border-radius: 8px;
+      border: 1px solid #2d3554;
+      word-break: break-all;
+      font-size: 0.85rem;
+      display: none;
+    }
+    .result.show { display: block; }
+    .result a { color: #7dd3fc; }
+    .label { font-size: 0.75rem; color: #64748b; margin-bottom: 0.25rem; }
+  </style>
+</head>
+<body>
+  <h1>🔗 蓝奏云直链解析</h1>
+  <div class="card">
+    <div class="label">分享链接</div>
+    <input id="url" type="text" placeholder="https://wwxxx.lanzoui.com/xxxxxxx" />
+    <div class="label">提取码（没有留空）</div>
+    <input id="pwd" type="text" placeholder="可选" maxlength="20" />
+    <button id="btn" onclick="parse()">解 析</button>
+    <div class="result" id="result"></div>
+  </div>
+
+  <script>
+    async function parse() {
+      const url = document.getElementById('url').value.trim();
+      const pwd = document.getElementById('pwd').value.trim();
+      const btn = document.getElementById('btn');
+      const result = document.getElementById('result');
+
+      if (!url) { alert('请输入分享链接'); return; }
+
+      btn.disabled = true;
+      btn.textContent = '解析中...';
+      result.className = 'result';
+
+      try {
+        const resp = await fetch('/api/parse?url=' + encodeURIComponent(url) + (pwd ? '&pwd=' + encodeURIComponent(pwd) : ''));
+        const data = await resp.json();
+
+        if (data.code === 200) {
+          result.innerHTML = `
+            <div style="color:#4ade80;margin-bottom:0.5rem">✓ 解析成功</div>
+            <div class="label">文件名</div>
+            <div style="margin-bottom:0.5rem">${data.name || '未知'}</div>
+            <div class="label">直链</div>
+            <a href="${data.url}" target="_blank">${data.url}</a>
+          `;
+        } else if (data.code === 403) {
+          result.innerHTML = `<span style="color:#f87171">⚠ 需要提取码</span>`;
+        } else {
+          result.innerHTML = `<span style="color:#f87171">✗ ${data.msg}</span>`;
+        }
+        result.className = 'result show';
+      } catch (e) {
+        result.innerHTML = `<span style="color:#f87171">✗ 请求失败：${e.message}</span>`;
+        result.className = 'result show';
+      }
+
+      btn.disabled = false;
+      btn.textContent = '解 析';
+    }
+  </script>
+</body>
+</html>

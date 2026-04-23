@@ -1,0 +1,9 @@
+{
+  "name": "lanzou-parser",
+  "version": "1.0.0",
+  "description": "蓝奏云直链解析 - Vercel Serverless",
+  "private": true,
+  "engines": {
+    "node": ">=18"
+  }
+}
