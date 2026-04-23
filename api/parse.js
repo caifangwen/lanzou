@@ -9,10 +9,7 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   const { url, pwd } = req.method === 'POST' ? req.body : req.query;
-
-  if (!url) {
-    return res.status(400).json({ code: 400, msg: '缺少 url 参数' });
-  }
+  if (!url) return res.status(400).json({ code: 400, msg: '缺少 url 参数' });
 
   try {
     const result = await parseLanzou(url.trim(), pwd || '');
@@ -26,7 +23,6 @@ export default async function handler(req, res) {
 async function parseLanzou(shareUrl, pwd = '') {
   const pageUrl = normalizeUrl(shareUrl);
   const baseOrigin = new URL(pageUrl).origin;
-
   const pageHtml = await get(pageUrl, {
     'User-Agent': UA,
     'Referer': baseOrigin + '/',
@@ -43,13 +39,10 @@ async function parseLanzou(shareUrl, pwd = '') {
 
   let ajaxHtml = pageHtml;
   let ajaxReferer = pageUrl;
-
   if (!needPwd) {
     const iframeSrc = extractIframeSrc(pageHtml);
     if (iframeSrc) {
-      const iframeUrl = iframeSrc.startsWith('http')
-        ? iframeSrc
-        : baseOrigin + iframeSrc;
+      const iframeUrl = toAbsoluteUrl(iframeSrc, pageUrl);
       ajaxHtml = await get(iframeUrl, { 'User-Agent': UA, 'Referer': pageUrl });
       ajaxReferer = iframeUrl;
     }
@@ -63,9 +56,8 @@ async function parseLanzou(shareUrl, pwd = '') {
   if (ajaxData.zt === 0) return { code: 403, msg: '提取码错误', need_pwd: true };
   if (ajaxData.zt !== 1) throw new Error(`ajaxm 响应异常: zt=${ajaxData.zt}, inf=${ajaxData.inf}`);
 
-  const midUrl = ajaxData.dom + '/file/' + ajaxData.url;
+  const midUrl = buildMidUrl(ajaxData, pageUrl);
   const finalUrl = await follow302(midUrl, pageUrl);
-
   return { code: 200, msg: 'ok', name: ajaxData.inf || '', url: finalUrl, need_pwd: false };
 }
 
@@ -87,20 +79,15 @@ async function ajaxDirect(html, referer, origin) {
 }
 
 async function ajaxWithPwd(html, pageUrl, origin, pwd) {
-  const signMatch =
-    html.match(/var\s+skdklds\s*=\s*['"]([^'"]+)['"]/) ||
-    html.match(/var\s+wp_sign\s*=\s*['"]([^'"]+)['"]/) ||
-    html.match(/'sign'\s*:\s*'([A-Za-z0-9_\-]{20,})'/) ||
-    html.match(/"sign"\s*:\s*"([A-Za-z0-9_\-]{20,})"/);
-
-  if (!signMatch) return null;
+  const sign = extractSign(html);
+  if (!sign) return null;
 
   const fileMatch = html.match(/ajaxm\.php\?file=(\d+)/);
   const ajaxUrl = fileMatch ? `/ajaxm.php?file=${fileMatch[1]}` : '/ajaxm.php';
 
   const body = new URLSearchParams({
     action: 'downprocess',
-    sign: signMatch[1],
+    sign,
     p: pwd,
   });
 
@@ -108,37 +95,53 @@ async function ajaxWithPwd(html, pageUrl, origin, pwd) {
 }
 
 function extractAjaxParams(html) {
-  // 优先匹配新结构 wp_sign
-  let wpSign =
-    (html.match(/var\s+wp_sign\s*=\s*['"]([^'"]+)['"]/) || [])[1];
-
-  // 回退到旧结构 skdklds
+  let wpSign = (html.match(/var\s+wp_sign\s*=\s*['"]([^'"]+)['"]/) || [])[1];
   if (!wpSign) {
     wpSign = (html.match(/var\s+skdklds\s*=\s*['"]([^'"]+)['"]/) || [])[1];
   }
 
-  // 匹配 ajaxdata (新) 或 websignkey (旧)
-  let ajaxdata =
+  const ajaxdata =
     (html.match(/var\s+ajaxdata\s*=\s*['"]([^'"]+)['"]/) || [])[1] ||
     (html.match(/var\s+websignkey\s*=\s*['"]([^'"]+)['"]/) || [])[1] ||
     '';
 
   const websign = (html.match(/var\s+websign\s*=\s*['"]([^'"]*)['"]/) || ['', ''])[1];
-
-  // ajax 端点
   const ajaxUrlMatch = html.match(/url\s*:\s*['"](\/?ajaxm\.php[^'"]*)['"]/);
   const ajaxUrl = ajaxUrlMatch ? ajaxUrlMatch[1] : '/ajaxm.php';
-
   if (!wpSign) return null;
 
   return { wp_sign: wpSign, ajaxdata, websign, ajaxUrl };
 }
 
 function extractIframeSrc(html) {
-  const m =
-    html.match(/src="(\/fn\?[^"]+)"/) ||
-    html.match(/<iframe[^>]+src="([^"]+)"/i);
+  const m = html.match(/<iframe[^>]+src=['"]([^'"]+)['"]/i);
   return m ? m[1] : null;
+}
+
+function extractSign(html) {
+  const patterns = [
+    /var\s+skdklds\s*=\s*['"]([^'"]+)['"]/,
+    /var\s+wp_sign\s*=\s*['"]([^'"]+)['"]/,
+    /['"]sign['"]\s*:\s*['"]([^'"]+)['"]/,
+    /sign\s*=\s*['"]([^'"]+)['"]/,
+  ];
+  for (const pattern of patterns) {
+    const match = html.match(pattern);
+    if (match && match[1]) return match[1];
+  }
+  return '';
+}
+
+function toAbsoluteUrl(rawUrl, baseUrl) {
+  if (!rawUrl) return '';
+  if (/^https?:\/\//i.test(rawUrl)) return rawUrl;
+  return new URL(rawUrl, baseUrl).toString();
+}
+
+function buildMidUrl(ajaxData, referer) {
+  const base = ajaxData.dom ? toAbsoluteUrl(ajaxData.dom, referer) : new URL(referer).origin;
+  const path = (ajaxData.url || '').replace(/^\/+/, '');
+  return `${base.replace(/\/+$/, '')}/file/${path}`;
 }
 
 async function postAjax(url, body, referer) {
@@ -176,10 +179,7 @@ async function get(url, headers = {}) {
 }
 
 function normalizeUrl(url) {
-  url = url.trim().replace(
-    /lanzoux\.com|lanzous\.com|lanzoun\.com|lanzoub\.com|lanzoul\.com/,
-    'lanzoui.com'
-  );
+  url = url.trim();
   if (!url.startsWith('http')) url = 'https://' + url;
   return url;
 }
